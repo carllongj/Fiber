@@ -1,0 +1,39 @@
+# http://editorconfig.org
+root = true
+
+[*] # 表示所有的文件都需要匹配以下规则
+
+# 当前的缩进方式,space表示空格,tab标识制表符缩进
+indent_style = space
+
+# 当缩进方式指定为space,则可以使用缩进的空格字符格式指定
+indent_size = 4
+
+# 指定行结束符的方式,可选为 lf,cr,crlf.
+end_of_line = lf
+
+# 指定文件字符集,可选为latin1,utf-8,utf-8-bom,utf-16be,utf-16le.
+charset = utf-8
+
+# 不保留行尾的空格
+trim_trailing_whitespace = true
+
+# 表示文件将以一行空白行结尾
+insert_final_newline = true
+
+
+
+# [*.java] # 在java中应用当前模式
+# indent_style = tab
+# 当 indent_style 设置为 tab时,indent_size则表示tab的宽度
+# indent_size = 4
+
+# [*.{json,yml,yaml}] # 在json文件和yml文件中应用
+# indent_style = space
+# indent_size = 2
+
+[*.md]
+trim_trailing_whitespace = false
+
+[Makefile]
+indent_style = tab

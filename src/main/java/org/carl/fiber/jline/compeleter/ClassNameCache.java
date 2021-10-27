@@ -1,6 +1,7 @@
 package org.carl.fiber.jline.compeleter;
 
 import java.io.File;
+import java.io.IOException;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -17,6 +18,16 @@ public class ClassNameCache {
      * 通过属性配置
      */
     private static final String CLASS_PATH_PROPERTY_KEY = "java.class.path";
+
+    /**
+     * java 额外 ext库
+     */
+    private static final String EXT_LIB_PATH_PROPERTY_KEY = "java.ext.dirs";
+
+    /**
+     * java 核心库
+     */
+    private static final String BOOTSTRAP_LIB_PATH_PROPERTY_KEY = "sun.boot.class.path";
 
     /**
      * 文件协议前缀
@@ -48,11 +59,10 @@ public class ClassNameCache {
      */
     private static final char INNER_CLASS_FLAG = '$';
 
-
     /**
      * 类名称缓存
      */
-    private Map<String, Object> classNameCache = new HashMap<>();
+    private final Map<String, Object> classNameCache = new HashMap<>();
 
     /**
      * 是否忽略掉匿名内部类
@@ -62,7 +72,7 @@ public class ClassNameCache {
     /**
      * 是否忽略掉内部类,该选项用以将内部类进行转换,添加一层类结构
      */
-    private boolean ignoreInnerClassName = false;
+    private boolean ignoreInnerClassName = true;
 
     /**
      * 是否忽略匿名内部类名称,该选项为false,则内部类忽略也必须为false.
@@ -101,10 +111,10 @@ public class ClassNameCache {
      * ClassLoader classLoader = Thread.currentThread().getContextClassLoader();
      * List<URL> urlList = new ArrayList<>();
      * if (classLoader instanceof URLClassLoader) {
-     *    URL[] classpathURLList = ((URLClassLoader) classLoader).getURLs();
-     *      if (Objects.nonNull(classpathURLList) && classpathURLList.length != 0) {
-     *          urlList.addAll(Arrays.asList(classpathURLList));
-     *      }
+     * URL[] classpathURLList = ((URLClassLoader) classLoader).getURLs();
+     * if (Objects.nonNull(classpathURLList) && classpathURLList.length != 0) {
+     * urlList.addAll(Arrays.asList(classpathURLList));
+     * }
      * }
      *
      *
@@ -117,22 +127,11 @@ public class ClassNameCache {
         checkInnerClassLoaded();
 
         List<URL> urlList = new ArrayList<>();
+        loadLibraries(System.getProperty(CLASS_PATH_PROPERTY_KEY), urlList);
+        loadLibraries(System.getProperty(EXT_LIB_PATH_PROPERTY_KEY), urlList);
+        loadLibraries(System.getProperty(BOOTSTRAP_LIB_PATH_PROPERTY_KEY), urlList);
 
         // 通过属性配置获取
-        String classpathValue = System.getProperty(CLASS_PATH_PROPERTY_KEY);
-        if (Objects.nonNull(classpathValue) && classpathValue.trim().length() > 0) {
-            String[] pathList = classpathValue.split(File.pathSeparator, -1);
-            if (pathList.length > 0) {
-                for (String path : pathList) {
-                    try {
-                        urlList.add(new File(path).toURI().toURL());
-                    } catch (Exception e) {
-                        // ignore
-                    }
-                }
-            }
-        }
-
         if (urlList.isEmpty()) {
             return;
         }
@@ -152,21 +151,7 @@ public class ClassNameCache {
                         // 递归扫描该目录下的所有目录与文件
                         scanDiskFiles(file);
                     } else if (file.getName().endsWith(JAR_SUFFIX)) {
-                        JarFile jarFile = new JarFile(file);
-                        Enumeration<JarEntry> entries = jarFile.entries();
-                        while (entries.hasMoreElements()) {
-                            // 获取Jar包中的文件,一个文件或者目录都是一个Entry
-                            JarEntry jarEntry = entries.nextElement();
-                            // 当前为文件且为 .class 文件,则舍弃其后缀
-                            if (!jarEntry.isDirectory() && jarEntry.getName().endsWith(CLASS_SUFFIX)) {
-                                // 获取目录的名称
-                                String entryName = jarEntry.getName();
-                                indexPath(entryName.substring(0, entryName.length() - CLASS_SUFFIX.length()));
-                            } else {
-                                // 普通文件和文件夹则按照正常索引
-                                indexPath(jarEntry.getName());
-                            }
-                        }
+                        scanJarFile(file);
                     }
                 }
             } catch (Exception e) {
@@ -175,6 +160,32 @@ public class ClassNameCache {
         }
     }
 
+    /**
+     * 加载指定类路径的属性
+     *
+     * @param classpathValue 指定的路径
+     * @param urlList        url集合
+     */
+    private void loadLibraries(String classpathValue, List<URL> urlList) {
+        if (Objects.nonNull(classpathValue) && classpathValue.trim().length() > 0) {
+            String[] pathList = classpathValue.split(File.pathSeparator, -1);
+            if (pathList.length > 0) {
+                for (String path : pathList) {
+                    try {
+                        urlList.add(new File(path).toURI().toURL());
+                    } catch (Exception e) {
+                        // ignore
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * 检查内部类是否符合规则
+     *
+     * @throws IllegalStateException 当设置忽略内部类时,却设置不忽略匿名内部类,将抛出异常
+     */
     private void checkInnerClassLoaded() {
         if (ignoreInnerClassName && !ignoreAnonymousInnerClassName) {
             throw new IllegalStateException("ignoreInnerClassName is true but ignoreAnonymousInnerClassName is false");
@@ -187,10 +198,31 @@ public class ClassNameCache {
      * 其索引路径则为 <code>org/carl/jdb/JDBLoader</code>,非<code>/opt/dev/project/classes/org/carl/jdb/JDBLoader</code>
      *
      * @param rootFile classpath设定的路径
+     * @throws IOException 抛出异常
      */
-    private void scanDiskFiles(final File rootFile) {
+    private void scanDiskFiles(final File rootFile) throws IOException {
         // 执行扫描磁盘文件路径
         doScanDiskFiles(rootFile.getPath(), rootFile);
+    }
+
+    /**
+     * 扫描jar包中的所有class稳健
+     *
+     * @param file jar包路径
+     * @throws IOException IO异常
+     */
+    private void scanJarFile(final File file) throws IOException {
+        JarFile jarFile = new JarFile(file);
+        Enumeration<JarEntry> entries = jarFile.entries();
+        while (entries.hasMoreElements()) {
+            // 获取Jar包中的文件,一个文件或者目录都是一个Entry
+            JarEntry jarEntry = entries.nextElement();
+            // 当前为文件才进行建立索引
+            if (!jarEntry.isDirectory()) {
+                // 格式化后建立索引
+                indexPath(formatFilePath(null, jarEntry.getName()));
+            }
+        }
     }
 
     /**
@@ -198,10 +230,15 @@ public class ClassNameCache {
      *
      * @param rootPath 根路径
      * @param file     指定的文件
+     * @throws IOException 抛出异常
      */
-    private void doScanDiskFiles(String rootPath, File file) {
+    private void doScanDiskFiles(String rootPath, File file) throws IOException {
         if (file.isFile()) {
-            indexPath(formatFilePath(rootPath, file));
+            if (file.getName().endsWith(JAR_SUFFIX)) {
+                scanJarFile(file);
+            } else if (file.getName().endsWith(CLASS_SUFFIX)) {
+                indexPath(formatFilePath(rootPath, file.getPath()));
+            }
         } else if (file.isDirectory()) {
             File[] files = file.listFiles();
             if (Objects.nonNull(files) && files.length > 0) {
@@ -215,15 +252,18 @@ public class ClassNameCache {
     /**
      * 格式化 文件路径
      *
-     * @param rootPath classpath的根路径(可能为相对路径或者绝对路径)
-     * @param filePath 当前的文件路径
+     * @param rootPath     classpath的根路径(可能为相对路径或者绝对路径,为null时,表示为jar包路径)
+     * @param filePathName 当前的文件路径
      * @return 返回格式化完成的路径, 若返回null, 则将忽略该路径
      */
-    private String formatFilePath(String rootPath, File filePath) {
-        // 获取到相对路径地址
-        String filePathName = filePath.getPath();
-        // 截取到相对路径地址
-        String relativePath = filePathName.substring(rootPath.length());
+    private String formatFilePath(String rootPath, String filePathName) {
+        String relativePath;
+        if (Objects.isNull(rootPath)) {
+            relativePath = filePathName;
+        } else {
+            // 截取到相对路径地址
+            relativePath = filePathName.substring(rootPath.length());
+        }
         // 格式化改路径
         String normalizeFile = reNormalizeFileIfNeed(relativePath);
         // 由于此处已经为相对路径,需要截取掉绝对路径开头的斜杠
@@ -239,8 +279,10 @@ public class ClassNameCache {
                 // 获取父级别路径
                 parent = normalizeFile.substring(0, normalizeFile.lastIndexOf('/') + 1);
             }
-            // 文件名
-            String fileName = filePath.getName().substring(0, normalizeFile.length() - 6);
+            // 得到文件名
+            String fileName = filePathName.substring(filePathName.lastIndexOf('/') + 1);
+            // 截取后缀名
+            fileName = fileName.substring(0, fileName.length() - CLASS_SUFFIX.length());
             // 该类为内部类
             if (fileName.indexOf(INNER_CLASS_FLAG) != -1) {
                 // 需要建立索引的情况
@@ -251,10 +293,10 @@ public class ClassNameCache {
                 return null;
             }
 
-            return normalizeFile;
+            return parent + fileName;
         }
-        //非class文件则直接返回,不去掉后缀
-        return normalizeFile;
+        //非class文件则不建立索引
+        return null;
     }
 
     /**

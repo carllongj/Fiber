@@ -2,7 +2,7 @@
 * 一个基于JDB且对其使用体验进行优化
 
 ### 支持的版本
-* 由于JDK在版本9之后(包含JDK9)的更新,不再提供了`${JAVA_HOME}/lib/tools.jar`,故仅支持JDK8及以下的版本.
+* 支持`JDK8`以及之后的版本
 
 ### 优化JDB内容
 * 这部分由 `jline` 库功能来进行实现
@@ -20,7 +20,14 @@
     * 主要是修改了读取控制台输入的逻辑,由`jline`来进行读取输入内容.
 
 ### 使用程序
-1. 将程序需要使用到的三个包的路径地址`组成classpath`.
-2. 通过命令行启动该程序
-    * `java -cp Fiber.jar:jline.jar:tools.jar:asm.jar org.carl.fiber.JDB`
-3. 由于只对JDB读取输入内容进行了修改,并未对其内部读取命令后的执行进行修改.故其操作方式与JDB一致.
+* `JDK8`
+    1. 将程序需要使用到的`四个包`的路径地址`组成classpath`.
+    2. 通过命令行启动该程序
+        * `java -cp Fiber.jar:jline.jar:tools.jar:asm.jar org.carl.fiber.JDB`
+    3. 由于只对JDB读取输入内容进行了修改,并未对其内部读取命令后的执行进行修改.故其操作方式与JDB一致.
+* `JDK9+`
+    1. JDK在版本9之后的更新,不再提供了`${JAVA_HOME}/lib/tools.jar`.
+    2. 需要使用三个包 `jline.jar`,`asm.jar`,`Fiber.jar`,`组成classpath`.
+    3. 添加反射权限 `--add-opens jdk.jdi/com.sun.tools.example.debug.tty=ALL-UNNAMED` 放开反射权限
+    4. 完整命令为 `java --add-opens jdk.jdi/com.sun.tools.example.debug.tty=ALL-UNNAMED -cp Fiber.jar:jline.jar:asm.jar org.carl.fiber.JDB`
+
